@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { AgentSupervisor, type AgentSupervisorOptions } from '../agent/AgentSupervisor.js';
 import { WorktreeManager, type WorktreeInfo } from '../worktree/WorktreeManager.js';
 import { logger } from '../logging/logger.js';
@@ -31,7 +32,7 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
-export class Orchestrator {
+export class Orchestrator extends EventEmitter {
   readonly supervisors: AgentSupervisor[] = [];
   readonly worktrees: WorktreeInfo[] = [];
   readonly wm: WorktreeManager;
@@ -43,6 +44,7 @@ export class Orchestrator {
   }> = new Map();
 
   constructor(opts: OrchestratorOptions) {
+    super();
     this.opts = opts;
     this.wm = new WorktreeManager(opts.repoDir);
     this.spawnStaggerMs = opts.spawnStaggerMs
@@ -102,6 +104,9 @@ export class Orchestrator {
 
       const supervisor = new AgentSupervisor(supervisorOpts);
       this.supervisors.push(supervisor);
+
+      // Notify UI that a new agent was added
+      this.emit('agentAdded', supervisor);
 
       // Prevent unhandled 'error' event crash — errors are tracked via promise
       supervisor.on('error', (err) => {

@@ -79,15 +79,12 @@ async function main(): Promise<void> {
     tasks.push({ id, prompt });
   }
 
-  // Launch agents (async, fire and watch)
-  await orch.launch(tasks);
-
   const startedAt = Date.now();
 
-  // Render UI
+  // Render UI BEFORE launch so user sees agents spawning in real-time
   const inkInstance = render(
     React.createElement(App, {
-      supervisors: orch.supervisors,
+      orchestrator: orch,
       startedAt,
     }),
     { exitOnCtrlC: false },
@@ -110,6 +107,9 @@ async function main(): Promise<void> {
 
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+  // Launch agents (UI updates in real-time via agentAdded + stateChange events)
+  await orch.launch(tasks);
 
   // Wait for all agents to finish
   const results = await orch.waitForAll();
