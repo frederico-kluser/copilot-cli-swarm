@@ -25,6 +25,9 @@ npm run dev:mock -- "hello"    # valida setup sem gastar rate limit
 # 1 agente
 npm run dev -- "refactor the auth module"
 
+# 1 prompt replicado para 4 agentes
+npm run dev -- -n 4 "Create a file called index.txt with the text hello world inside"
+
 # 3 agentes em paralelo
 npm run dev -- -n 3 "task 1" "task 2" "task 3"
 

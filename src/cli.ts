@@ -70,6 +70,14 @@ export function parseCli(argv: string[]): ParsedArgs {
   };
 }
 
+export function expandPromptsForAgents(prompts: string[], agents: number): string[] {
+  if (prompts.length === 1) {
+    return Array.from({ length: agents }, () => prompts[0]!);
+  }
+
+  return Array.from({ length: agents }, (_, index) => prompts[index % prompts.length]!);
+}
+
 export function printHelp(): void {
   process.stderr.write(`
 Uso: multi-copilot [opções] <prompt>...
@@ -83,6 +91,7 @@ Opções:
 
 Exemplos:
   multi-copilot "refactor auth module"
+  multi-copilot -n 4 "Create a file called index.txt with the text hello world inside"
   multi-copilot -n 3 "task 1" "task 2" "task 3"
   multi-copilot --mock "dev test"
 `);

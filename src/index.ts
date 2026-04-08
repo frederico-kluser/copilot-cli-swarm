@@ -1,6 +1,6 @@
 import React from 'react';
 import { render } from 'ink';
-import { parseCli, printHelp } from './cli.js';
+import { expandPromptsForAgents, parseCli, printHelp } from './cli.js';
 import { Orchestrator, type AgentTask } from './orchestrator/Orchestrator.js';
 import { App } from './ui/App.js';
 import { logger, logFilePath } from './logging/logger.js';
@@ -71,13 +71,12 @@ async function main(): Promise<void> {
 
   await orch.init();
 
-  // Build tasks: distribute prompts across agents
-  const tasks: AgentTask[] = [];
-  for (let i = 0; i < parsed.agents; i++) {
-    const prompt = parsed.prompts[i % parsed.prompts.length]!;
-    const id = Math.random().toString(36).slice(2, 8);
-    tasks.push({ id, prompt });
-  }
+  // Build tasks: 1 prompt replicates to all agents; many prompts use round-robin
+  const expandedPrompts = expandPromptsForAgents(parsed.prompts, parsed.agents);
+  const tasks: AgentTask[] = expandedPrompts.map((prompt) => ({
+    id: Math.random().toString(36).slice(2, 8),
+    prompt,
+  }));
 
   const startedAt = Date.now();
 
