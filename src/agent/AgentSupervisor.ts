@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { reduceAgentState, initialState, type AgentState } from '../acp/phase-machine.js';
-import type { SessionUpdate, JsonRpcMessage } from '../acp/types.js';
+import type { SessionUpdate, JsonRpcMessage, RequestPermissionParams, PermissionOption } from '../acp/types.js';
 import { createAgentLogger } from '../logging/logger.js';
 import { MockCopilotProcess, type MockScenario } from '../mock/MockCopilotProcess.js';
 import type { Logger } from 'pino';
@@ -99,7 +99,7 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
       this.child = mock;
     } else {
       const { execa } = await import('execa');
-      const child = execa(this.opts.command ?? 'copilot', this.opts.args ?? ['--acp', '--stdio'], {
+      const child = execa(this.opts.command ?? 'copilot', this.opts.args ?? ['--acp', '--stdio', '--allow-all-tools'], {
         cwd: this.opts.cwd,
         stdin: 'pipe',
         stdout: 'pipe',
@@ -160,7 +160,7 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
     try {
       await this.sendRequest('initialize', {
         protocolVersion: 1,
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+        clientCapabilities: {},
       });
 
       const sessionResult = await this.sendRequest('session/new', {
@@ -193,27 +193,78 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
       return;
     }
 
-    // Response (has id, has result or error)
-    if ('id' in msg && msg.id != null) {
-      const pending = this.pendingRequests.get(msg.id);
+    const hasId = 'id' in msg && msg.id != null;
+    const hasMethod = 'method' in msg && typeof msg.method === 'string';
+
+    // Request from agent (has id AND method) — agent asking client to do something
+    if (hasId && hasMethod) {
+      const req = msg as { id: number | string; method: string; params?: unknown };
+      this.handleServerRequest(req.id, req.method, req.params);
+      return;
+    }
+
+    // Response (has id, NO method) — response to our earlier request
+    if (hasId) {
+      const resp = msg as { id: number | string; result?: unknown; error?: { message: string } };
+      const pending = this.pendingRequests.get(resp.id);
       if (pending) {
-        this.pendingRequests.delete(msg.id);
-        if ('error' in msg && msg.error) {
-          pending.reject(new Error(msg.error.message));
+        this.pendingRequests.delete(resp.id);
+        if ('error' in resp && resp.error) {
+          pending.reject(new Error(resp.error.message));
         } else {
-          pending.resolve('result' in msg ? msg.result : undefined);
+          pending.resolve('result' in resp ? resp.result : undefined);
         }
       }
       return;
     }
 
     // Notification (no id, has method)
-    if ('method' in msg && msg.method === 'session/update') {
-      const params = msg.params as { sessionId: string; update: SessionUpdate };
-      if (params?.update) {
-        this.state = reduceAgentState(this.state, params.update);
-        this.emit('stateChange', this.state);
+    if (hasMethod) {
+      const notif = msg as { method: string; params?: unknown };
+      if (notif.method === 'session/update') {
+        const params = notif.params as { sessionId: string; update: SessionUpdate };
+        if (params?.update) {
+          this.state = reduceAgentState(this.state, params.update);
+          this.emit('stateChange', this.state);
+        }
       }
+    }
+  }
+
+  private handleServerRequest(id: number | string, method: string, params: unknown): void {
+    this.log.info({ event: 'server_request', method, id }, `Agent request: ${method}`);
+
+    if (method === 'session/request_permission') {
+      const reqParams = params as RequestPermissionParams;
+      const options: PermissionOption[] = reqParams?.options ?? [];
+      // Find first allow option, prefer allow_always over allow_once
+      const allowOption = options.find((o) => o.kind === 'allow_always')
+        ?? options.find((o) => o.kind === 'allow_once');
+
+      if (allowOption) {
+        this.sendResponse(id, { outcome: { outcome: 'selected', optionId: allowOption.optionId } });
+      } else {
+        this.sendResponse(id, { outcome: { outcome: 'cancelled' } });
+      }
+      return;
+    }
+
+    // Unknown method — respond with JSON-RPC Method not found
+    this.log.warn({ event: 'unknown_server_method', method, id }, `Unknown agent request method: ${method}`);
+    this.sendResponse(id, undefined, { code: -32601, message: `Method not found: ${method}` });
+  }
+
+  private sendResponse(id: number | string, result?: unknown, error?: { code: number; message: string }): void {
+    const msg: Record<string, unknown> = { jsonrpc: '2.0', id };
+    if (error) {
+      msg['error'] = error;
+    } else {
+      msg['result'] = result ?? null;
+    }
+    try {
+      this.child?.stdin?.write(JSON.stringify(msg) + '\n');
+    } catch (err) {
+      this.log.error({ err, id }, 'Failed to send response to agent');
     }
   }
 

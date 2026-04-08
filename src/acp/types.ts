@@ -116,3 +116,27 @@ export interface JsonRpcNotification {
 }
 
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
+
+// --- ACP Client-side method types (requests FROM agent TO client) ---
+
+export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+
+export interface PermissionOption {
+  optionId: string;
+  name: string;
+  kind: PermissionOptionKind;
+}
+
+export interface RequestPermissionParams {
+  sessionId: string;
+  toolCall: { toolCallId: string; title?: string; kind?: string };
+  options: PermissionOption[];
+}
+
+export type RequestPermissionOutcome =
+  | { outcome: 'selected'; optionId: string }
+  | { outcome: 'cancelled' };
+
+export interface RequestPermissionResult {
+  outcome: RequestPermissionOutcome;
+}

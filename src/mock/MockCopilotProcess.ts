@@ -1,5 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { createInterface } from 'node:readline';
 
 export type MockScenario = 'happy' | 'slow' | 'error' | 'rate_limit';
 
@@ -39,6 +40,8 @@ export class MockCopilotProcess extends EventEmitter {
   exitCode: number | null = null;
 
   private abort = { aborted: false };
+  private stdinRl: ReturnType<typeof createInterface> | null = null;
+  private pendingStdinResolvers: Array<(line: string) => void> = [];
 
   constructor(opts: MockCopilotProcessOptions = {}) {
     super();
@@ -46,7 +49,34 @@ export class MockCopilotProcess extends EventEmitter {
     this.stdout = new PassThrough();
     this.stderr = new PassThrough();
     this.pid = Math.floor(Math.random() * 1e6) + 900000;
+
+    // Set up stdin line reader to receive responses from the client
+    this.stdinRl = createInterface({ input: this.stdin });
+    this.stdinRl.on('line', (line) => {
+      const resolver = this.pendingStdinResolvers.shift();
+      if (resolver) resolver(line);
+    });
+
     this.startScenario(opts.scenario ?? 'happy');
+  }
+
+  /** Wait for a JSON-RPC response from the client on stdin */
+  private waitForResponse(timeoutMs = 5000): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('Mock: timeout waiting for client response'));
+      }, timeoutMs);
+
+      this.pendingStdinResolvers.push((line) => {
+        clearTimeout(timer);
+        try {
+          const parsed = JSON.parse(line) as { result?: unknown };
+          resolve(parsed.result);
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
   }
 
   private async startScenario(scenario: MockScenario): Promise<void> {
@@ -165,6 +195,29 @@ export class MockCopilotProcess extends EventEmitter {
       return;
     }
 
+    // session/request_permission — simulate agent asking client for tool approval
+    // Register waiter BEFORE emitting (emit triggers synchronous readline chain)
+    const permissionResponse = this.waitForResponse();
+
+    emit(out, {
+      jsonrpc: '2.0',
+      id: 100,
+      method: 'session/request_permission',
+      params: {
+        sessionId,
+        toolCall: { toolCallId: 'tc_1', title: 'Execute command', kind: 'execute' },
+        options: [
+          { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'allow-always', name: 'Allow always', kind: 'allow_always' },
+          { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+        ],
+      },
+    });
+
+    // Wait for the client to respond before continuing
+    await permissionResponse;
+    if (this.abort.aborted) return;
+
     // tool_call_update completed
     emit(out, {
       jsonrpc: '2.0',
@@ -228,6 +281,12 @@ export class MockCopilotProcess extends EventEmitter {
     if (this.killed) return false;
     this.killed = true;
     this.abort.aborted = true;
+    this.stdinRl?.close();
+    // Resolve any pending stdin waiters so they don't hang
+    for (const resolver of this.pendingStdinResolvers) {
+      resolver('');
+    }
+    this.pendingStdinResolvers.length = 0;
     setImmediate(() => {
       this.stdout.push(null);
       this.emit('exit', signal === 'SIGKILL' ? null : 0, signal);
