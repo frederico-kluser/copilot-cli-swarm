@@ -103,10 +103,15 @@ Commits atômicos (uma mudança lógica por commit).
 ## Skills disponíveis
 
 Consulte `.claude/skills/` para conhecimento procedural sob demanda:
-- **acp-protocol** — protocolo ACP, SessionUpdate types, phase machine
+- **architecture-overview** — arquitetura, module boundaries, data flow, EventEmitter patterns
+- **acp-protocol** — protocolo ACP, SessionUpdate types, phase machine, config options
+- **agent-lifecycle** — AgentSupervisor: spawn, handshake, prompt, rate limit, shutdown
+- **orchestrator-coordination** — 3-phase launch, model state, stagger, shutdown coordenado
+- **cli-and-entrypoint** — parseArgs, wizard vs direct mode, signal handling, entry point flow
 - **worktree-management** — lifecycle de git worktrees com simple-git
-- **ink-ui-patterns** — padrões UI Ink 6.8 com React 19
+- **ink-ui-patterns** — padrões UI Ink 6.8 com React 19, wizard, model selector
 - **code-review** — checklist de review para PRs
 - **debug-agent-issues** — troubleshooting de agentes (crash, zombie, rate limit)
 - **mock-development** — desenvolvimento com mock mode e cenários
+- **testing-patterns** — vitest, factories, real git repos, E2E scripts
 - **add-new-feature** — workflow step-by-step para adicionar features

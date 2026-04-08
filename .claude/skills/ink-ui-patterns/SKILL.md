@@ -10,12 +10,30 @@ description: >-
 ## Arquitetura de componentes
 
 ```
-App ({ supervisors, startedAt })
-├── StatusBar ({ supervisors, startedAt })  — barra de status no topo
-├── AgentGrid ({ supervisors })             — grid responsivo
-│   └── AgentPanel × N ({ supervisor, width }) — painel por agente (memo)
-└── Footer ()                               — caminho do log file
+App ({ orchestrator, startedAt, interactive?, onLaunch? })
+├── [wizard mode] WizardScreen ({ onComplete }) — config interativa
+│   └── ArrowSelect, TextInput, ConfirmInput
+│
+├── [running mode]
+│   ├── StatusBar ({ supervisors, startedAt, modelState, selectorOpen })
+│   ├── [selectorOpen] Model Selector overlay
+│   ├── AgentGrid ({ supervisors })
+│   │   └── AgentPanel × N ({ supervisor, width }) — painel por agente (memo)
+│   └── Footer ()
 ```
+
+## Modos da App
+
+```typescript
+interface AppProps {
+  orchestrator: Orchestrator;
+  startedAt: number;
+  interactive?: boolean;        // true → começa no wizard
+  onLaunch?: (config: WizardConfig) => void;
+}
+```
+
+App usa `useState<'wizard' | 'running'>`. Em modo `wizard`, renderiza `WizardScreen`. Quando wizard completa, muda para `running` e chama `onLaunch(config)`.
 
 ## Grid responsivo
 
@@ -106,6 +124,113 @@ useEffect(() => {
 ```
 
 Formatar como `MM:SS`. Nunca usar `Date.now()` direto no JSX — sempre via state/effect.
+
+## Model Selector overlay
+
+App gerencia `selectorOpen` e `highlightedIndex` state. Keybindings via `useInput`:
+
+```typescript
+useInput((input, key) => {
+  if ((input === 'm' || input === 'M') && modelState.availableModels.length > 0) {
+    setSelectorOpen(open => !open);    // Toggle com M
+  }
+  if (selectorOpen) {
+    if (key.escape) setSelectorOpen(false);
+    if (key.upArrow || input === 'k') setHighlightedIndex(i => i <= 0 ? last : i - 1);
+    if (key.downArrow || input === 'j') setHighlightedIndex(i => (i + 1) % total);
+    if (key.return) {
+      const model = modelState.availableModels[highlightedIndex];
+      setSelectorOpen(false);
+      orchestrator.setModelForAll(model.value);
+    }
+  }
+});
+```
+
+Renderiza dropdown com borda `round`, cor `cyan` (ou `yellow` durante switching).
+
+## useOrchestratorModelState hook
+
+```typescript
+function useOrchestratorModelState(orch: Orchestrator): OrchestratorModelState {
+  const subscribe = useCallback((cb) => {
+    orch.on('modelStateChange', cb);
+    return () => orch.off('modelStateChange', cb);
+  }, [orch]);
+  const getSnapshot = useCallback(() => orch.getModelState(), [orch]);
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+```
+
+Retorna `{ availableModels, selectedModel, selectedModelLabel, switching, error }`.
+
+## useOrchestratorSupervisors hook
+
+```typescript
+function useOrchestratorSupervisors(orch: Orchestrator): AgentSupervisor[] {
+  const [supervisors, setSupervisors] = useState(() => [...orch.supervisors]);
+  useEffect(() => {
+    setSupervisors([...orch.supervisors]);  // sync on mount
+    const onAdded = () => setSupervisors([...orch.supervisors]);
+    orch.on('agentAdded', onAdded);
+    return () => orch.off('agentAdded', onAdded);
+  }, [orch]);
+  return supervisors;
+}
+```
+
+Usa `useState` + `useEffect` (não `useSyncExternalStore`) porque a lista cresce mas não tem snapshot estável — novos supervisors são adicionados via evento.
+
+## WizardScreen
+
+Steps: `agents_count` → `model_select` → `prompt_mode` → `prompts` → `model_overrides` → `review`.
+
+```typescript
+interface WizardConfig {
+  agents: number;
+  model: string;
+  agentConfigs: AgentConfig[];  // { id, prompt, model? }
+}
+```
+
+Componentes usados:
+- `TextInput` (@inkjs/ui) — para número de agentes e prompts
+- `ConfirmInput` (@inkjs/ui) — para sim/não (prompt compartilhado, overrides de modelo)
+- `ArrowSelect` (custom) — seletor com setas, substitui `Select` do @inkjs/ui que tem bugs com valores vazios
+
+### ArrowSelect (custom component)
+
+```tsx
+function ArrowSelect({ options, onSelect }: {
+  options: { label: string; value: string; description?: string }[];
+  onSelect: (value: string) => void;
+}) {
+  const [focused, setFocused] = useState(0);
+  useInput((_input, key) => {
+    if (key.upArrow) setFocused(i => i <= 0 ? options.length - 1 : i - 1);
+    if (key.downArrow) setFocused(i => i >= options.length - 1 ? 0 : i + 1);
+    if (key.return) onSelect(options[focused].value);
+  });
+  // render com '> ' para focused, '  ' para outros
+}
+```
+
+## AgentPanel — model e rate_limited display
+
+```tsx
+{(state.currentModelLabel || state.currentModel) && (
+  <Text dimColor>model: {state.currentModelLabel ?? state.currentModel}</Text>
+)}
+
+{state.phase === 'rate_limited' && (
+  <Text color="yellow">
+    rate limited, retry {state.retryCount}/3
+    {state.retryResumeAt
+      ? ` in ${Math.max(0, Math.ceil((state.retryResumeAt - Date.now()) / 1000))}s`
+      : ''}
+  </Text>
+)}
+```
 
 ## Gotchas
 

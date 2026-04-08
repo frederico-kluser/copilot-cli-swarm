@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { TextInput, Select, ConfirmInput } from '@inkjs/ui';
+import { TextInput, ConfirmInput } from '@inkjs/ui';
 import type { WizardConfig, AgentConfig, WizardStep } from './types.js';
 import { DEFAULT_MODELS } from './types.js';
 
@@ -12,10 +12,43 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
+/** Custom arrow-key selector — replaces @inkjs/ui Select which has bugs with empty values */
+function ArrowSelect({ options, onSelect }: {
+  options: { label: string; value: string; description?: string }[];
+  onSelect: (value: string) => void;
+}) {
+  const [focused, setFocused] = useState(0);
+
+  useInput((_input, key) => {
+    if (key.upArrow) {
+      setFocused((i) => (i <= 0 ? options.length - 1 : i - 1));
+    }
+    if (key.downArrow) {
+      setFocused((i) => (i >= options.length - 1 ? 0 : i + 1));
+    }
+    if (key.return) {
+      const opt = options[focused];
+      if (opt) {
+        onSelect(opt.value);
+      }
+    }
+  });
+
+  return (
+    <Box flexDirection="column">
+      {options.map((opt, i) => (
+        <Text key={opt.value} color={i === focused ? 'cyan' : undefined} bold={i === focused}>
+          {i === focused ? '> ' : '  '}{opt.label}{opt.description ? ` — ${opt.description}` : ''}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
 export function WizardScreen({ onComplete }: WizardScreenProps) {
   const [step, setStep] = useState<WizardStep>('agents_count');
   const [agentCount, setAgentCount] = useState(1);
-  const [globalModel, setGlobalModel] = useState('');
+  const [globalModel, setGlobalModel] = useState('auto');
   const [sharedPrompt, setSharedPrompt] = useState(true);
   const [prompts, setPrompts] = useState<string[]>([]);
   const [currentPromptIndex, setCurrentPromptIndex] = useState(0);
@@ -23,12 +56,17 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
   const [overrideIndex, setOverrideIndex] = useState(0);
   const [wantOverrides, setWantOverrides] = useState<boolean | null>(null);
 
+  const modelLabel = useCallback((value: string) => {
+    const m = DEFAULT_MODELS.find((mod) => mod.value === value);
+    return m ? m.label : value;
+  }, []);
+
   // Step: agents_count
   if (step === 'agents_count') {
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-        <Text dimColor>---</Text>
+        <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+        <Text dimColor>{'─'.repeat(40)}</Text>
         <Box marginTop={1}>
           <Text>Numero de agentes (1-6): </Text>
           <TextInput
@@ -44,7 +82,7 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
             }}
           />
         </Box>
-        <Text dimColor>Maximo 6 agentes por sessao</Text>
+        <Text dimColor>Maximo 6 agentes. Pressione Enter para confirmar.</Text>
       </Box>
     );
   }
@@ -53,15 +91,16 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
   if (step === 'model_select') {
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-        <Text dimColor>---</Text>
+        <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+        <Text dimColor>{'─'.repeat(40)}</Text>
         <Text dimColor>Agentes: {agentCount}</Text>
         <Box marginTop={1} flexDirection="column">
-          <Text>Modelo global (pode customizar por agente depois):</Text>
+          <Text bold>Selecione o modelo global:</Text>
+          <Text dimColor>Use setas para navegar, Enter para confirmar</Text>
           <Box marginTop={1}>
-            <Select
-              options={DEFAULT_MODELS.map((m) => ({ label: m.label, value: m.value }))}
-              onChange={(value) => {
+            <ArrowSelect
+              options={DEFAULT_MODELS}
+              onSelect={(value) => {
                 setGlobalModel(value);
                 setStep('prompt_mode');
               }}
@@ -76,11 +115,11 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
   if (step === 'prompt_mode') {
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-        <Text dimColor>---</Text>
-        <Text dimColor>Agentes: {agentCount} | Modelo: {globalModel || 'auto'}</Text>
+        <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+        <Text dimColor>{'─'.repeat(40)}</Text>
+        <Text dimColor>Agentes: {agentCount} | Modelo: {modelLabel(globalModel)}</Text>
         <Box marginTop={1} flexDirection="column">
-          <Text>Usar o mesmo prompt para todos os agentes?</Text>
+          <Text bold>Usar o mesmo prompt para todos os agentes?</Text>
           <Box marginTop={1}>
             <ConfirmInput
               defaultChoice="confirm"
@@ -113,18 +152,19 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
 
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-        <Text dimColor>---</Text>
-        <Text dimColor>Agentes: {agentCount} | Modelo: {globalModel || 'auto'}</Text>
+        <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+        <Text dimColor>{'─'.repeat(40)}</Text>
+        <Text dimColor>Agentes: {agentCount} | Modelo: {modelLabel(globalModel)}</Text>
         <Box marginTop={1} flexDirection="column">
-          <Text>{label}</Text>
+          <Text bold>{label}</Text>
           {prompts.map((p, i) => (
-            <Text key={i} dimColor>  Agente {i + 1}: {p}</Text>
+            <Text key={i} color="green">  {'✓'} Agente {i + 1}: {p}</Text>
           ))}
           <Box marginTop={1}>
-            <Text color="green">{`> `}</Text>
+            <Text color="yellow">{'> '}</Text>
             <TextInput
-              placeholder="Digite o prompt..."
+              key={`prompt-${currentPromptIndex}`}
+              placeholder="Digite o prompt e pressione Enter..."
               onSubmit={(value) => {
                 if (!value.trim()) return;
                 const newPrompts = [...prompts, value.trim()];
@@ -135,7 +175,7 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
                     setWantOverrides(null);
                     setStep('model_overrides');
                   } else {
-                    finalize(newPrompts, []);
+                    setStep('review');
                   }
                 } else {
                   setCurrentPromptIndex(currentPromptIndex + 1);
@@ -150,15 +190,14 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
 
   // Step: model_overrides
   if (step === 'model_overrides') {
-    // First ask if user wants to customize models per agent
     if (wantOverrides === null) {
       return (
         <Box flexDirection="column" paddingX={1} paddingY={1}>
-          <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-          <Text dimColor>---</Text>
-          <Text dimColor>Agentes: {agentCount} | Modelo: {globalModel || 'auto'}</Text>
+          <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+          <Text dimColor>{'─'.repeat(40)}</Text>
+          <Text dimColor>Agentes: {agentCount} | Modelo: {modelLabel(globalModel)}</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>Customizar modelo por agente?</Text>
+            <Text bold>Customizar modelo por agente?</Text>
             <Box marginTop={1}>
               <ConfirmInput
                 defaultChoice="cancel"
@@ -168,7 +207,7 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
                 }}
                 onCancel={() => {
                   setWantOverrides(false);
-                  finalize(prompts, []);
+                  setStep('review');
                 }}
               />
             </Box>
@@ -178,32 +217,34 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
       );
     }
 
-    // Show select per agent
     const agentPrompt = sharedPrompt ? prompts[0]! : prompts[overrideIndex]!;
+    const overrideOptions = [
+      { label: `Global (${modelLabel(globalModel)})`, value: 'global' },
+      ...DEFAULT_MODELS.filter((m) => m.value !== globalModel),
+    ];
+
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-        <Text dimColor>---</Text>
-        <Text dimColor>Agentes: {agentCount} | Modelo global: {globalModel || 'auto'}</Text>
+        <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+        <Text dimColor>{'─'.repeat(40)}</Text>
+        <Text dimColor>Agentes: {agentCount} | Modelo global: {modelLabel(globalModel)}</Text>
         <Box marginTop={1} flexDirection="column">
-          <Text>Modelo do Agente {overrideIndex + 1}/{agentCount}:</Text>
+          <Text bold>Modelo do Agente {overrideIndex + 1}/{agentCount}:</Text>
           <Text dimColor>  Prompt: {agentPrompt.slice(0, 60)}{agentPrompt.length > 60 ? '...' : ''}</Text>
           {modelOverrides.slice(0, overrideIndex).map((m, i) => (
-            <Text key={i} dimColor>  Agente {i + 1}: {m || globalModel || 'auto'}</Text>
+            <Text key={i} color="green">  {'✓'} Agente {i + 1}: {m ? modelLabel(m) : modelLabel(globalModel)}</Text>
           ))}
           <Box marginTop={1}>
-            <Select
-              options={[
-                { label: `Global (${globalModel || 'auto'})`, value: '' },
-                ...DEFAULT_MODELS.filter((m) => m.value !== '').map((m) => ({ label: m.label, value: m.value })),
-              ]}
-              onChange={(value) => {
+            <ArrowSelect
+              key={`override-${overrideIndex}`}
+              options={overrideOptions}
+              onSelect={(value) => {
                 const newOverrides = [...modelOverrides];
-                newOverrides[overrideIndex] = value || undefined;
+                newOverrides[overrideIndex] = value === 'global' ? undefined : value;
                 setModelOverrides(newOverrides);
 
                 if (overrideIndex + 1 >= agentCount) {
-                  finalize(prompts, newOverrides);
+                  setStep('review');
                 } else {
                   setOverrideIndex(overrideIndex + 1);
                 }
@@ -217,38 +258,37 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
 
   // Step: review
   if (step === 'review') {
-    const configs = buildAgentConfigs(prompts, modelOverrides);
+    const configs = buildAgentConfigs();
     return (
       <Box flexDirection="column" paddingX={1} paddingY={1}>
-        <Text bold color="cyan">Multi-Copilot Orchestrator</Text>
-        <Text dimColor>---</Text>
+        <Text bold color="cyan">Multi-Copilot Orchestrator — Setup</Text>
+        <Text dimColor>{'─'.repeat(40)}</Text>
         <Box marginTop={1} flexDirection="column">
           <Text bold>Resumo da configuracao:</Text>
-          <Text>  Agentes: {agentCount}</Text>
-          <Text>  Modelo global: {globalModel || 'auto'}</Text>
+          <Text>  Agentes: <Text color="cyan">{agentCount}</Text></Text>
+          <Text>  Modelo global: <Text color="cyan">{modelLabel(globalModel)}</Text></Text>
           <Box marginTop={1} flexDirection="column">
             {configs.map((c, i) => (
-              <Box key={c.id} flexDirection="column">
-                <Text>  Agente {i + 1} ({c.id}):</Text>
-                <Text dimColor>    Prompt: {c.prompt.slice(0, 70)}{c.prompt.length > 70 ? '...' : ''}</Text>
-                <Text dimColor>    Modelo: {c.model || globalModel || 'auto'}</Text>
+              <Box key={c.id} flexDirection="column" marginBottom={1}>
+                <Text bold>  Agente {i + 1} <Text dimColor>({c.id})</Text></Text>
+                <Text>    Prompt: <Text color="green">{c.prompt.slice(0, 70)}{c.prompt.length > 70 ? '...' : ''}</Text></Text>
+                <Text>    Modelo: <Text color="cyan">{modelLabel(c.model || globalModel)}</Text></Text>
               </Box>
             ))}
           </Box>
           <Box marginTop={1} flexDirection="column">
-            <Text>Lancar agentes?</Text>
+            <Text bold>Lancar agentes?</Text>
             <Box marginTop={1}>
               <ConfirmInput
                 defaultChoice="confirm"
                 onConfirm={() => {
                   onComplete({
                     agents: agentCount,
-                    model: globalModel,
+                    model: globalModel === 'auto' ? '' : globalModel,
                     agentConfigs: configs,
                   });
                 }}
                 onCancel={() => {
-                  // Go back to beginning
                   setStep('agents_count');
                   setPrompts([]);
                   setModelOverrides([]);
@@ -258,7 +298,7 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
                 }}
               />
             </Box>
-            <Text dimColor>N = recomecar configuracao</Text>
+            <Text dimColor>Y = iniciar | N = recomecar configuracao</Text>
           </Box>
         </Box>
       </Box>
@@ -267,26 +307,11 @@ export function WizardScreen({ onComplete }: WizardScreenProps) {
 
   return null;
 
-  function buildAgentConfigs(
-    currentPrompts: string[],
-    overrides: (string | undefined)[],
-  ): AgentConfig[] {
+  function buildAgentConfigs(): AgentConfig[] {
     return Array.from({ length: agentCount }, (_, i) => ({
       id: generateId(),
-      prompt: sharedPrompt ? currentPrompts[0]! : currentPrompts[i]!,
-      model: overrides[i] || undefined,
+      prompt: sharedPrompt ? prompts[0]! : prompts[i]!,
+      model: modelOverrides[i] || undefined,
     }));
-  }
-
-  function finalize(
-    currentPrompts: string[],
-    overrides: (string | undefined)[],
-  ): void {
-    if (overrides.some((m) => m !== undefined)) {
-      setStep('review');
-    } else {
-      // Skip review if no overrides — go directly to review for confirmation
-      setStep('review');
-    }
   }
 }
