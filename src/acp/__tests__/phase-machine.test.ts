@@ -43,6 +43,28 @@ const messageChunk = (text: string): SessionUpdate => ({
   content: { type: 'text', text },
 });
 
+const configOptionUpdate = (currentValue = 'gpt-5'): SessionUpdate => ({
+  sessionUpdate: 'config_option_update',
+  configOptions: [
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue,
+      options: [
+        {
+          group: 'OpenAI',
+          options: [
+            { value: 'gpt-5', name: 'GPT-5' },
+            { value: 'gpt-5-mini', name: 'GPT-5 mini' },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
 describe('phase-machine', () => {
   it('initialState.phase === spawning', () => {
     expect(initialState.phase).toBe('spawning');
@@ -118,5 +140,44 @@ describe('phase-machine', () => {
     const next = reduceAgentState(errorState, thought('ignored'));
     expect(next.phase).toBe('error');
     expect(next).toBe(errorState);
+  });
+
+  it('config_option_update atualiza metadata de modelo sem trocar de fase', () => {
+    const state = reduceAgentState({ ...initialState, phase: 'idle' }, configOptionUpdate('gpt-5-mini'));
+
+    expect(state.phase).toBe('idle');
+    expect(state.currentModel).toBe('gpt-5-mini');
+    expect(state.currentModelLabel).toBe('GPT-5 mini');
+  });
+
+  it('done ainda aceita refresh de modelo via config_option_update', () => {
+    const doneState: AgentState = {
+      ...initialState,
+      phase: 'done',
+      currentModel: 'gpt-5',
+      currentModelLabel: 'GPT-5',
+    };
+
+    const next = reduceAgentState(doneState, configOptionUpdate('gpt-5-mini'));
+
+    expect(next.phase).toBe('done');
+    expect(next.currentModel).toBe('gpt-5-mini');
+    expect(next.currentModelLabel).toBe('GPT-5 mini');
+  });
+
+  it('error ainda aceita refresh de modelo via config_option_update', () => {
+    const errorState: AgentState = {
+      ...initialState,
+      phase: 'error',
+      error: 'boom',
+      currentModel: 'gpt-5',
+      currentModelLabel: 'GPT-5',
+    };
+
+    const next = reduceAgentState(errorState, configOptionUpdate('gpt-5-mini'));
+
+    expect(next.phase).toBe('error');
+    expect(next.error).toBe('boom');
+    expect(next.currentModel).toBe('gpt-5-mini');
   });
 });

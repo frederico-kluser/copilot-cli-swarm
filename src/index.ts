@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { expandPromptsForAgents, parseCli, printHelp } from './cli.js';
+import { AgentSupervisor } from './agent/AgentSupervisor.js';
 import { Orchestrator, type AgentTask } from './orchestrator/Orchestrator.js';
 import { App } from './ui/App.js';
 import { logger, logFilePath } from './logging/logger.js';
@@ -24,6 +25,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function printAvailableModels(parsed: ReturnType<typeof parseCli>, repoDir: string): Promise<number> {
+  const supervisor = new AgentSupervisor({
+    id: 'model-list',
+    cwd: repoDir,
+    model: parsed.model,
+    mock: parsed.mock,
+    mockScenario: parsed.mockScenario,
+  });
+
+  try {
+    await supervisor.start();
+    const models = supervisor.getAvailableModels();
+
+    if (models.length === 0) {
+      process.stderr.write('Nenhum modelo foi exposto pelo agente atual.\n');
+      return 1;
+    }
+
+    process.stdout.write('Available models:\n');
+    for (const model of models) {
+      const marker = model.value === supervisor.getCurrentModel() ? '*' : ' ';
+      const description = model.description ? ` - ${model.description}` : '';
+      process.stdout.write(`${marker} ${model.value} (${model.name})${description}\n`);
+    }
+
+    return 0;
+  } finally {
+    await supervisor.shutdown();
+  }
+}
+
 async function main(): Promise<void> {
   let parsed;
   try {
@@ -43,6 +75,8 @@ async function main(): Promise<void> {
   logger.info({
     event: 'start',
     agents: parsed.agents,
+    listModels: parsed.listModels,
+    model: parsed.model,
     mock: parsed.mock,
     prompts: parsed.prompts.length,
     logFile: logFilePath,
@@ -52,6 +86,10 @@ async function main(): Promise<void> {
   await reapStalePids();
 
   const repoDir = process.cwd();
+
+  if (parsed.listModels) {
+    process.exit(await printAvailableModels(parsed, repoDir));
+  }
 
   // Detect default branch
   const { simpleGit } = await import('simple-git');
@@ -65,6 +103,7 @@ async function main(): Promise<void> {
   const orch = new Orchestrator({
     repoDir,
     baseBranch,
+    model: parsed.model,
     mock: parsed.mock,
     mockScenario: parsed.mockScenario,
   });

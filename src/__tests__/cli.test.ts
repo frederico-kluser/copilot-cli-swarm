@@ -8,6 +8,20 @@ describe('parseCli', () => {
     expect(result.agents).toBe(4);
     expect(result.prompts).toEqual(['same prompt']);
   });
+
+  it('parses --model', () => {
+    const result = parseCli(['node', 'cli', '--model', 'gpt-5', 'same prompt']);
+
+    expect(result.model).toBe('gpt-5');
+    expect(result.prompts).toEqual(['same prompt']);
+  });
+
+  it('allows --list-models without prompts', () => {
+    const result = parseCli(['node', 'cli', '--list-models']);
+
+    expect(result.listModels).toBe(true);
+    expect(result.prompts).toEqual([]);
+  });
 });
 
 describe('expandPromptsForAgents', () => {

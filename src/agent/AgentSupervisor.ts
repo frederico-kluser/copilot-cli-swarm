@@ -1,8 +1,18 @@
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
-import { reduceAgentState, initialState, type AgentState } from '../acp/phase-machine.js';
-import type { SessionUpdate, JsonRpcMessage, RequestPermissionParams, PermissionOption } from '../acp/types.js';
+import { reduceAgentState, initialState, withConfigOptions, type AgentState } from '../acp/phase-machine.js';
+import type {
+  SessionUpdate,
+  JsonRpcMessage,
+  RequestPermissionParams,
+  PermissionOption,
+  SessionNewResult,
+  SessionPromptResult,
+  SessionSetConfigOptionResult,
+  SessionConfigValue,
+} from '../acp/types.js';
+import { getAvailableModels as getAvailableModelOptions, getModelConfigOption } from '../acp/types.js';
 import { createAgentLogger } from '../logging/logger.js';
 import { MockCopilotProcess, type MockScenario } from '../mock/MockCopilotProcess.js';
 import type { Logger } from 'pino';
@@ -12,6 +22,7 @@ export interface AgentSupervisorOptions {
   cwd: string;
   command?: string;
   args?: string[];
+  model?: string;
   mock?: boolean;
   mockScenario?: MockScenario;
 }
@@ -61,6 +72,21 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+function buildCommandArgs(opts: AgentSupervisorOptions): string[] {
+  const args = opts.args ? [...opts.args] : ['--acp', '--stdio', '--allow-all-tools'];
+
+  if (!opts.model) {
+    return args;
+  }
+
+  const hasModelArg = args.some((arg) => arg === '--model' || arg.startsWith('--model='));
+  if (hasModelArg) {
+    return args;
+  }
+
+  return [...args, '--model', opts.model];
+}
+
 export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
   readonly id: string;
   state: AgentState = { ...initialState };
@@ -73,6 +99,7 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
   private exitResolve: (() => void) | null = null;
   private lastPromptText = '';
   private shutdownController = new AbortController();
+  private isShuttingDown = false;
   private jsonRpcId = 0;
   private pendingRequests = new Map<number | string, {
     resolve: (result: unknown) => void;
@@ -87,6 +114,7 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
   }
 
   async start(): Promise<void> {
+    this.isShuttingDown = false;
     this.state = { ...initialState };
     this.emit('stateChange', this.state);
 
@@ -95,11 +123,14 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
     });
 
     if (this.opts.mock) {
-      const mock = new MockCopilotProcess({ scenario: this.opts.mockScenario });
+      const mock = new MockCopilotProcess({
+        scenario: this.opts.mockScenario,
+        model: this.opts.model,
+      });
       this.child = mock;
     } else {
       const { execa } = await import('execa');
-      const child = execa(this.opts.command ?? 'copilot', this.opts.args ?? ['--acp', '--stdio', '--allow-all-tools'], {
+      const child = execa(this.opts.command ?? 'copilot', buildCommandArgs(this.opts), {
         cwd: this.opts.cwd,
         stdin: 'pipe',
         stdout: 'pipe',
@@ -117,6 +148,11 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
 
     // Handle exit
     this.child.on('exit', (code: unknown, signal: unknown) => {
+      if (this.isShuttingDown) {
+        this.exitResolve?.();
+        return;
+      }
+
       if (this.state.phase === 'done') {
         this.exitResolve?.();
         return;
@@ -166,11 +202,11 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
       const sessionResult = await this.sendRequest('session/new', {
         cwd: this.opts.cwd,
         mcpServers: [],
-      }) as { sessionId: string };
+      }) as SessionNewResult;
 
       this.sessionId = sessionResult.sessionId;
 
-      this.state = { ...this.state, phase: 'idle' };
+      this.state = withConfigOptions({ ...this.state, phase: 'idle' }, sessionResult.configOptions);
       this.emit('stateChange', this.state);
       this.log.info({ event: 'ready', sessionId: this.sessionId }, 'Agent ready');
     } catch (err) {
@@ -181,6 +217,45 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
       };
       this.emit('stateChange', this.state);
       throw err;
+    }
+  }
+
+  getAvailableModels(): SessionConfigValue[] {
+    return getAvailableModelOptions(this.state.configOptions);
+  }
+
+  getCurrentModel(): string | null {
+    return this.state.currentModel;
+  }
+
+  async setModel(model: string): Promise<void> {
+    if (!this.sessionId) {
+      throw new Error('Agent session not started');
+    }
+
+    const modelConfig = getModelConfigOption(this.state.configOptions);
+    if (!modelConfig) {
+      throw new Error('Agent does not expose a model selector');
+    }
+
+    const availableModels = this.getAvailableModels();
+    if (!availableModels.some((option) => option.value === model)) {
+      throw new Error(`Unknown model: ${model}`);
+    }
+
+    if (this.state.currentModel === model) {
+      return;
+    }
+
+    const result = await this.sendRequest('session/set_config_option', {
+      sessionId: this.sessionId,
+      configId: modelConfig.id,
+      value: model,
+    }) as SessionSetConfigOptionResult;
+
+    if (result.configOptions) {
+      this.state = withConfigOptions(this.state, result.configOptions);
+      this.emit('stateChange', this.state);
     }
   }
 
@@ -330,7 +405,7 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
     const result = await this.sendRequest('session/prompt', {
       sessionId: this.sessionId,
       prompt: [{ type: 'text', text }],
-    }) as { stopReason?: string };
+    }) as SessionPromptResult;
 
     const stopReason = result?.stopReason ?? 'end_turn';
     this.state = { ...this.state, phase: 'done', retryCount: 0, retryResumeAt: null };
@@ -356,6 +431,7 @@ export class AgentSupervisor extends EventEmitter<AgentSupervisorEvents> {
   }
 
   async shutdown(): Promise<void> {
+    this.isShuttingDown = true;
     this.shutdownController.abort();
     if (!this.child || this.child.killed) return;
 

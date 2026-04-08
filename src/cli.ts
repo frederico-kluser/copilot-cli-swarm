@@ -2,10 +2,12 @@ import { parseArgs } from 'node:util';
 
 export interface ParsedArgs {
   help: boolean;
+  listModels: boolean;
   mock: boolean;
   mockScenario: 'happy' | 'slow' | 'error' | 'rate_limit';
   agents: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  model?: string;
   prompts: string[];
 }
 
@@ -17,10 +19,12 @@ export function parseCli(argv: string[]): ParsedArgs {
     args: argv.slice(2),
     options: {
       help: { type: 'boolean', short: 'h', default: false },
+      'list-models': { type: 'boolean', default: false },
       mock: { type: 'boolean', default: false },
       'mock-scenario': { type: 'string', default: 'happy' },
       agents: { type: 'string', short: 'n' },
       'log-level': { type: 'string', default: 'info' },
+      model: { type: 'string' },
     },
     allowPositionals: true,
     strict: true,
@@ -29,10 +33,12 @@ export function parseCli(argv: string[]): ParsedArgs {
   if (values.help) {
     return {
       help: true,
+      listModels: false,
       mock: false,
       mockScenario: 'happy',
       agents: 1,
       logLevel: 'info',
+      model: undefined,
       prompts: [],
     };
   }
@@ -47,8 +53,12 @@ export function parseCli(argv: string[]): ParsedArgs {
     throw new Error(`--mock-scenario inválido: "${mockScenario}". Use: ${VALID_SCENARIOS.join(', ')}`);
   }
 
+  const model = typeof values.model === 'string' && values.model.trim().length > 0
+    ? values.model.trim()
+    : undefined;
+
   const prompts = positionals.filter((p) => p.trim().length > 0);
-  if (prompts.length === 0) {
+  if (!values['list-models'] && prompts.length === 0) {
     throw new Error('Pelo menos um prompt é obrigatório. Use --help para ver opções.');
   }
 
@@ -62,10 +72,12 @@ export function parseCli(argv: string[]): ParsedArgs {
 
   return {
     help: false,
+    listModels: values['list-models'] as boolean,
     mock: values.mock as boolean,
     mockScenario: mockScenario as ParsedArgs['mockScenario'],
     agents,
     logLevel: logLevel as ParsedArgs['logLevel'],
+    model,
     prompts,
   };
 }
@@ -84,6 +96,8 @@ Uso: multi-copilot [opções] <prompt>...
 
 Opções:
   -n, --agents N         Número de agentes (default: número de prompts)
+      --model ID         Seleciona o modelo inicial do Copilot
+      --list-models      Lista modelos disponíveis e sai
       --mock             Usar mock ACP em vez de Copilot real
       --mock-scenario S  happy|slow|error|rate_limit (default: happy)
       --log-level L      debug|info|warn|error (default: info)
@@ -92,6 +106,8 @@ Opções:
 Exemplos:
   multi-copilot "refactor auth module"
   multi-copilot -n 4 "Create a file called index.txt with the text hello world inside"
+  multi-copilot --model gpt-5 "fix flaky tests"
+  multi-copilot --list-models
   multi-copilot -n 3 "task 1" "task 2" "task 3"
   multi-copilot --mock "dev test"
 `);

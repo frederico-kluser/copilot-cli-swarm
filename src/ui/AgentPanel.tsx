@@ -67,6 +67,12 @@ export const AgentPanel = memo(function AgentPanel({ supervisor, width }: AgentP
         <Text color={borderColor}> {label}</Text>
       </Box>
 
+      {(state.currentModelLabel || state.currentModel) && (
+        <Text dimColor>
+          model: {state.currentModelLabel ?? state.currentModel}
+        </Text>
+      )}
+
       {state.currentTool && (
         <Text dimColor>
           tool: {state.currentTool.title} ({state.currentTool.status})

@@ -28,6 +28,12 @@ npm run dev -- "refactor the auth module"
 # 1 prompt replicado para 4 agentes
 npm run dev -- -n 4 "Create a file called index.txt with the text hello world inside"
 
+# Escolher modelo inicial via CLI
+npm run dev -- --model gpt-5 "fix flaky tests"
+
+# Listar modelos disponíveis
+npm run dev -- --list-models
+
 # 3 agentes em paralelo
 npm run dev -- -n 3 "task 1" "task 2" "task 3"
 
@@ -37,6 +43,7 @@ npm run dev:mock -- -n 2 "a" "b"
 # Mock com cenários específicos
 npm run dev:mock:error -- "test"
 npm run dev:mock:slow -- "test"
+npm run dev:mock -- --list-models
 
 # Com tmux para detach/reattach
 tmux new-session -s orch "npm run dev -- 'long task'"
@@ -47,10 +54,19 @@ tmux new-session -s orch "npm run dev -- 'long task'"
 | Flag | Default | Descrição |
 |---|---|---|
 | `-n, --agents` | `prompts.length` | Número de agentes |
+| `--model` | — | Seleciona o modelo inicial para todos os agentes |
+| `--list-models` | false | Lista modelos disponíveis e sai |
 | `--mock` | false | Usa mock ACP em vez de Copilot real |
 | `--mock-scenario` | happy | happy, slow, error, rate_limit |
 | `--log-level` | info | debug, info, warn, error |
 | `-h, --help` | — | Mostra ajuda |
+
+## Seletor de modelo na UI
+
+- Pressione `M` para abrir o seletor global de modelo
+- Use setas ou `j`/`k` para navegar
+- Pressione `Enter` para aplicar em todos os agentes ativos
+- Pressione `Esc` para fechar
 
 ## Arquitetura
 
@@ -119,7 +135,7 @@ copilot auth
 2. **simple-git via .raw() para worktrees** — sem API dedicada mas estável
 3. **pino síncrono** — perde throughput mas nunca perde log em crash
 4. **execa sobre child_process** — cleanup mais robusto e API mais ergonômica
-5. **parseArgs nativo (não yargs)** — menos dep, suficiente para 4 flags
+5. **parseArgs nativo (não yargs)** — menos dep, suficiente para a superfície atual da CLI
 6. **Mock mode in-process (não binário fake)** — zero latência, controle total
 
 ## Layout

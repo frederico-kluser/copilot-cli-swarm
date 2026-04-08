@@ -3,10 +3,13 @@ import { Box, Text } from 'ink';
 import type { AgentSupervisor } from '../agent/AgentSupervisor.js';
 import type { AgentPhase } from '../acp/types.js';
 import { logFilePath } from '../logging/logger.js';
+import type { OrchestratorModelState } from '../orchestrator/Orchestrator.js';
 
 interface StatusBarProps {
   supervisors: AgentSupervisor[];
   startedAt: number;
+  modelState: OrchestratorModelState;
+  selectorOpen: boolean;
 }
 
 const PHASE_ICONS: Record<AgentPhase, string> = {
@@ -28,7 +31,7 @@ function formatElapsed(ms: number): string {
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-export function StatusBar({ supervisors, startedAt }: StatusBarProps) {
+export function StatusBar({ supervisors, startedAt, modelState, selectorOpen }: StatusBarProps) {
   const [elapsed, setElapsed] = useState(Date.now() - startedAt);
 
   useEffect(() => {
@@ -61,6 +64,12 @@ export function StatusBar({ supervisors, startedAt }: StatusBarProps) {
     .map((p) => `${PHASE_ICONS[p]} ${counts[p]}`)
     .join('  ');
 
+  const modelSummary = modelState.selectedModelLabel
+    ? `model: ${modelState.selectedModelLabel}`
+    : modelState.availableModels.length > 0
+      ? 'model: select with M'
+      : 'model: detecting';
+
   return (
     <Box flexDirection="column">
       <Box>
@@ -70,6 +79,13 @@ export function StatusBar({ supervisors, startedAt }: StatusBarProps) {
         <Text> {phaseDisplay || 'starting...'} </Text>
         <Text dimColor> {formatElapsed(elapsed)} </Text>
         <Text dimColor> Ctrl+C to quit</Text>
+        {modelState.availableModels.length > 0 && <Text dimColor>  M to switch model</Text>}
+      </Box>
+      <Box>
+        <Text color={modelState.switching ? 'yellow' : 'cyan'}>{modelSummary}</Text>
+        {selectorOpen && <Text dimColor>  arrows/jk navigate, enter apply, esc close</Text>}
+        {!selectorOpen && modelState.switching && <Text color="yellow">  switching...</Text>}
+        {modelState.error && <Text color="red">  {modelState.error}</Text>}
       </Box>
     </Box>
   );

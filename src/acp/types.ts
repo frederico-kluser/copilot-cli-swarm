@@ -59,6 +59,53 @@ export interface ConfirmationRequest {
   message?: string;
 }
 
+export interface SessionConfigValue {
+  value: string;
+  name: string;
+  description?: string;
+}
+
+export interface SessionConfigValueGroup {
+  group: string;
+  options: SessionConfigValue[];
+}
+
+export type SessionConfigSelectOptionEntry = SessionConfigValue | SessionConfigValueGroup;
+
+interface BaseSessionConfigOption {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+}
+
+export interface SessionSelectConfigOption extends BaseSessionConfigOption {
+  type: 'select';
+  currentValue: string;
+  options: SessionConfigSelectOptionEntry[];
+}
+
+export interface SessionBooleanConfigOption extends BaseSessionConfigOption {
+  type: 'boolean';
+  currentValue: boolean;
+}
+
+export interface SessionUnknownConfigOption extends BaseSessionConfigOption {
+  type: string;
+  currentValue: unknown;
+  options?: unknown;
+}
+
+export type SessionConfigOption =
+  | SessionSelectConfigOption
+  | SessionBooleanConfigOption
+  | SessionUnknownConfigOption;
+
+export interface ConfigOptionUpdate {
+  sessionUpdate: 'config_option_update';
+  configOptions: SessionConfigOption[];
+}
+
 export interface UnknownUpdate {
   sessionUpdate: string;
   [key: string]: unknown;
@@ -71,6 +118,7 @@ export type SessionUpdate =
   | ToolCallUpdate
   | AgentMessageChunk
   | ConfirmationRequest
+  | ConfigOptionUpdate
   | UnknownUpdate;
 
 // --- Type guards ---
@@ -92,6 +140,17 @@ export const isPlan = (u: SessionUpdate): u is Plan =>
 
 export const isConfirmationRequest = (u: SessionUpdate): u is ConfirmationRequest =>
   u.sessionUpdate === 'confirmation_request';
+
+export const isConfigOptionUpdate = (u: SessionUpdate): u is ConfigOptionUpdate =>
+  u.sessionUpdate === 'config_option_update';
+
+export const isSessionConfigValueGroup = (
+  entry: SessionConfigSelectOptionEntry,
+): entry is SessionConfigValueGroup => 'group' in entry;
+
+export const isSessionSelectConfigOption = (
+  option: SessionConfigOption,
+): option is SessionSelectConfigOption => option.type === 'select';
 
 // --- JSON-RPC types ---
 
@@ -139,4 +198,108 @@ export type RequestPermissionOutcome =
 
 export interface RequestPermissionResult {
   outcome: RequestPermissionOutcome;
+}
+
+export interface SessionNewResult {
+  sessionId: string;
+  configOptions?: SessionConfigOption[];
+}
+
+export interface SessionPromptResult {
+  stopReason?: string;
+}
+
+export interface SessionSetConfigOptionParams {
+  sessionId: string;
+  configId: string;
+  type?: string;
+  value: string | boolean;
+}
+
+export interface SessionSetConfigOptionResult {
+  configOptions?: SessionConfigOption[];
+}
+
+export function cloneSessionConfigOptions(
+  configOptions?: SessionConfigOption[] | null,
+): SessionConfigOption[] | null {
+  if (!configOptions) {
+    return null;
+  }
+
+  return configOptions.map((option) => {
+    if (isSessionSelectConfigOption(option)) {
+      return {
+        ...option,
+        options: option.options.map((entry) => {
+          if (isSessionConfigValueGroup(entry)) {
+            return {
+              ...entry,
+              options: entry.options.map((value) => ({ ...value })),
+            };
+          }
+
+          return { ...entry };
+        }),
+      };
+    }
+
+    return { ...option };
+  });
+}
+
+export function flattenSessionConfigOptions(
+  option: SessionSelectConfigOption,
+): SessionConfigValue[] {
+  return option.options.flatMap((entry) => {
+    if (isSessionConfigValueGroup(entry)) {
+      return entry.options.map((value) => ({ ...value }));
+    }
+
+    return [{ ...entry }];
+  });
+}
+
+export function getModelConfigOption(
+  configOptions?: SessionConfigOption[] | null,
+): SessionSelectConfigOption | null {
+  if (!configOptions) {
+    return null;
+  }
+
+  const selectOptions = configOptions.filter(isSessionSelectConfigOption);
+
+  return selectOptions.find((option) => option.category === 'model')
+    ?? selectOptions.find((option) => option.id === 'model' || option.id === 'models')
+    ?? selectOptions.find((option) => option.name.trim().toLowerCase() === 'model')
+    ?? null;
+}
+
+export function getAvailableModels(
+  configOptions?: SessionConfigOption[] | null,
+): SessionConfigValue[] {
+  const option = getModelConfigOption(configOptions);
+  if (!option) {
+    return [];
+  }
+
+  return flattenSessionConfigOptions(option);
+}
+
+export function getCurrentModel(
+  configOptions?: SessionConfigOption[] | null,
+): string | null {
+  return getModelConfigOption(configOptions)?.currentValue ?? null;
+}
+
+export function getCurrentModelLabel(
+  configOptions?: SessionConfigOption[] | null,
+): string | null {
+  const currentModel = getCurrentModel(configOptions);
+  if (!currentModel) {
+    return null;
+  }
+
+  const currentOption = getAvailableModels(configOptions).find((option) => option.value === currentModel);
+  return currentOption?.name ?? currentModel;
 }

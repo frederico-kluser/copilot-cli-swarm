@@ -2,6 +2,7 @@ import type {
   AgentPhase,
   SessionUpdate,
   PlanEntry,
+  SessionConfigOption,
 } from './types.js';
 import {
   isAgentThoughtChunk,
@@ -9,6 +10,10 @@ import {
   isToolCall,
   isToolCallUpdate,
   isPlan,
+  isConfigOptionUpdate,
+  cloneSessionConfigOptions,
+  getCurrentModel,
+  getCurrentModelLabel,
 } from './types.js';
 
 export interface AgentState {
@@ -17,6 +22,9 @@ export interface AgentState {
   lastThought: string;
   currentTool: { id: string; title: string; status: string } | null;
   plan: PlanEntry[] | null;
+  configOptions: SessionConfigOption[] | null;
+  currentModel: string | null;
+  currentModelLabel: string | null;
   error: string | null;
   retryCount: number;
   retryResumeAt: number | null;
@@ -28,6 +36,9 @@ export const initialState: AgentState = {
   lastThought: '',
   currentTool: null,
   plan: null,
+  configOptions: null,
+  currentModel: null,
+  currentModelLabel: null,
   error: null,
   retryCount: 0,
   retryResumeAt: null,
@@ -39,7 +50,22 @@ export function resetState(): AgentState {
 
 const FORBIDDEN_SOURCE: ReadonlySet<AgentPhase> = new Set(['done', 'error']);
 
+export function withConfigOptions(
+  state: AgentState,
+  configOptions?: SessionConfigOption[] | null,
+): AgentState {
+  const nextConfigOptions = cloneSessionConfigOptions(configOptions);
+
+  return {
+    ...state,
+    configOptions: nextConfigOptions,
+    currentModel: getCurrentModel(nextConfigOptions),
+    currentModelLabel: getCurrentModelLabel(nextConfigOptions),
+  };
+}
+
 export function reducePhase(current: AgentPhase, update: SessionUpdate): AgentPhase {
+  if (isConfigOptionUpdate(update)) return current;
   if (FORBIDDEN_SOURCE.has(current)) return current;
 
   if (isAgentThoughtChunk(update)) return 'thinking';
@@ -55,6 +81,10 @@ export function reducePhase(current: AgentPhase, update: SessionUpdate): AgentPh
 }
 
 export function reduceAgentState(state: AgentState, update: SessionUpdate): AgentState {
+  if (isConfigOptionUpdate(update)) {
+    return withConfigOptions(state, update.configOptions);
+  }
+
   if (FORBIDDEN_SOURCE.has(state.phase)) return state;
 
   const nextPhase = reducePhase(state.phase, update);
