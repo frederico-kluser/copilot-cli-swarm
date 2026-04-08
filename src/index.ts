@@ -6,6 +6,7 @@ import { Orchestrator, type AgentTask } from './orchestrator/Orchestrator.js';
 import { App } from './ui/App.js';
 import { logger, logFilePath } from './logging/logger.js';
 import { readPids, clearAll, isProcessAlive } from './agent/pids-file.js';
+import type { WizardConfig } from './ui/wizard/types.js';
 
 async function reapStalePids(): Promise<void> {
   const stale = await readPids();
@@ -110,31 +111,17 @@ async function main(): Promise<void> {
 
   await orch.init();
 
-  // Build tasks: 1 prompt replicates to all agents; many prompts use round-robin
-  const expandedPrompts = expandPromptsForAgents(parsed.prompts, parsed.agents);
-  const tasks: AgentTask[] = expandedPrompts.map((prompt) => ({
-    id: Math.random().toString(36).slice(2, 8),
-    prompt,
-  }));
-
   const startedAt = Date.now();
 
-  // Render UI BEFORE launch so user sees agents spawning in real-time
-  const inkInstance = render(
-    React.createElement(App, {
-      orchestrator: orch,
-      startedAt,
-    }),
-    { exitOnCtrlC: false },
-  );
-
-  // Shutdown handler
+  // Shutdown handler shared by both modes
   let shuttingDown = false;
+  let inkInstance: ReturnType<typeof render> | undefined;
+
   const shutdown = async (signal: 'SIGINT' | 'SIGTERM') => {
     if (shuttingDown) return;
     shuttingDown = true;
 
-    try { inkInstance.unmount(); } catch { /* ignore */ }
+    try { inkInstance?.unmount(); } catch { /* ignore */ }
 
     process.stderr.write(`\n[${signal}] shutting down ${orch.supervisors.length} agents...\n`);
 
@@ -146,8 +133,50 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
-  // Launch agents (UI updates in real-time via agentAdded + stateChange events)
-  await orch.launch(tasks);
+  if (parsed.interactive) {
+    // Interactive wizard mode — render wizard UI, wait for user config
+    const launchPromise = new Promise<WizardConfig>((resolve) => {
+      inkInstance = render(
+        React.createElement(App, {
+          orchestrator: orch,
+          startedAt,
+          interactive: true,
+          onLaunch: resolve,
+        }),
+        { exitOnCtrlC: false },
+      );
+    });
+
+    const config = await launchPromise;
+
+    // Build tasks from wizard config
+    const tasks: AgentTask[] = config.agentConfigs.map((ac) => ({
+      id: ac.id,
+      prompt: ac.prompt,
+      model: ac.model || config.model || undefined,
+    }));
+
+    await orch.launch(tasks);
+  } else {
+    // Direct mode — build tasks from CLI args
+    const expandedPrompts = expandPromptsForAgents(parsed.prompts, parsed.agents);
+    const tasks: AgentTask[] = expandedPrompts.map((prompt) => ({
+      id: Math.random().toString(36).slice(2, 8),
+      prompt,
+    }));
+
+    // Render UI BEFORE launch so user sees agents spawning in real-time
+    inkInstance = render(
+      React.createElement(App, {
+        orchestrator: orch,
+        startedAt,
+      }),
+      { exitOnCtrlC: false },
+    );
+
+    // Launch agents (UI updates in real-time via agentAdded + stateChange events)
+    await orch.launch(tasks);
+  }
 
   // Wait for all agents to finish
   const results = await orch.waitForAll();
@@ -157,7 +186,7 @@ async function main(): Promise<void> {
   // Wait a moment for UI to show final states
   await sleep(2000);
 
-  try { inkInstance.unmount(); } catch { /* ignore */ }
+  try { inkInstance?.unmount(); } catch { /* ignore */ }
 
   // Preserve worktrees on normal completion so user can inspect results
   await orch.shutdown({ preserveWorktrees: true });

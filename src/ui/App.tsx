@@ -5,17 +5,34 @@ import { AgentGrid } from './AgentGrid.js';
 import { StatusBar, Footer } from './StatusBar.js';
 import { useOrchestratorSupervisors } from './useOrchestratorSupervisors.js';
 import { useOrchestratorModelState } from './useOrchestratorModelState.js';
+import { WizardScreen } from './wizard/WizardScreen.js';
+import type { WizardConfig } from './wizard/types.js';
 
 interface AppProps {
   orchestrator: Orchestrator;
   startedAt: number;
+  interactive?: boolean;
+  onLaunch?: (config: WizardConfig) => void;
 }
 
-export function App({ orchestrator, startedAt }: AppProps) {
+export function App({ orchestrator, startedAt, interactive, onLaunch }: AppProps) {
+  const [mode, setMode] = useState<'wizard' | 'running'>(interactive ? 'wizard' : 'running');
   const supervisors = useOrchestratorSupervisors(orchestrator);
   const modelState = useOrchestratorModelState(orchestrator);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+
+  // Wizard mode
+  if (mode === 'wizard') {
+    return (
+      <WizardScreen
+        onComplete={(config) => {
+          setMode('running');
+          onLaunch?.(config);
+        }}
+      />
+    );
+  }
 
   useEffect(() => {
     if (modelState.availableModels.length === 0) {

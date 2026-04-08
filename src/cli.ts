@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 export interface ParsedArgs {
   help: boolean;
   listModels: boolean;
+  interactive: boolean;
   mock: boolean;
   mockScenario: 'happy' | 'slow' | 'error' | 'rate_limit';
   agents: number;
@@ -34,6 +35,7 @@ export function parseCli(argv: string[]): ParsedArgs {
     return {
       help: true,
       listModels: false,
+      interactive: false,
       mock: false,
       mockScenario: 'happy',
       agents: 1,
@@ -58,11 +60,9 @@ export function parseCli(argv: string[]): ParsedArgs {
     : undefined;
 
   const prompts = positionals.filter((p) => p.trim().length > 0);
-  if (!values['list-models'] && prompts.length === 0) {
-    throw new Error('Pelo menos um prompt é obrigatório. Use --help para ver opções.');
-  }
+  const interactive = !values['list-models'] && prompts.length === 0;
 
-  let agents = prompts.length;
+  let agents = prompts.length || 1;
   if (values.agents !== undefined) {
     agents = parseInt(values.agents, 10);
     if (!Number.isFinite(agents) || agents < 1) {
@@ -73,6 +73,7 @@ export function parseCli(argv: string[]): ParsedArgs {
   return {
     help: false,
     listModels: values['list-models'] as boolean,
+    interactive,
     mock: values.mock as boolean,
     mockScenario: mockScenario as ParsedArgs['mockScenario'],
     agents,
@@ -103,7 +104,10 @@ Opções:
       --log-level L      debug|info|warn|error (default: info)
   -h, --help             Mostra esta ajuda
 
+Sem argumentos, abre o wizard interativo para configurar agentes.
+
 Exemplos:
+  multi-copilot                        Wizard interativo
   multi-copilot "refactor auth module"
   multi-copilot -n 4 "Create a file called index.txt with the text hello world inside"
   multi-copilot --model gpt-5 "fix flaky tests"

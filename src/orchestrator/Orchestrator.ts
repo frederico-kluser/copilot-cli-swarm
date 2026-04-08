@@ -17,6 +17,7 @@ export interface OrchestratorOptions {
 export interface AgentTask {
   id: string;
   prompt: string;
+  model?: string;
 }
 
 export interface PromptResult {
@@ -79,7 +80,7 @@ export class Orchestrator extends EventEmitter {
     this.spawnStaggerMs = opts.spawnStaggerMs
       ?? (process.env['COPILOT_ORCH_STAGGER_MS']
         ? parseInt(process.env['COPILOT_ORCH_STAGGER_MS'], 10)
-        : 2000);
+        : 500);
     this.modelState = {
       availableModels: [],
       selectedModel: opts.model ?? null,
@@ -208,12 +209,14 @@ export class Orchestrator extends EventEmitter {
 
     const baseBranch = this.opts.baseBranch ?? 'main';
 
-    for (let i = 0; i < tasks.length; i++) {
-      const task = tasks[i]!;
+    // Phase 1: Create worktrees and instantiate supervisors (sequential, fast I/O)
+    const prepared: { supervisor: AgentSupervisor; task: AgentTask; id: string }[] = [];
+
+    for (const task of tasks) {
       const id = task.id || generateId();
 
       logger.info(
-        { event: 'spawn', id, index: i, spawnAt: new Date().toISOString() },
+        { event: 'spawn', id, spawnAt: new Date().toISOString() },
         `Spawning agent ${id}`,
       );
 
@@ -222,7 +225,6 @@ export class Orchestrator extends EventEmitter {
         wt = await this.wm.create({ id, baseBranch });
       } catch (err) {
         logger.error({ err, id }, 'Failed to create worktree, skipping task');
-        // Track as error
         const tracker = this.createTracker(id);
         tracker.resolve({ id, status: 'error', error: `worktree failed: ${(err as Error).message}` });
         continue;
@@ -232,7 +234,7 @@ export class Orchestrator extends EventEmitter {
       const supervisorOpts: AgentSupervisorOptions = {
         id,
         cwd: wt.path,
-        model: this.modelState.selectedModel ?? undefined,
+        model: task.model ?? this.modelState.selectedModel ?? undefined,
         mock: this.opts.mock,
         mockScenario: this.opts.mockScenario,
       };
@@ -246,7 +248,7 @@ export class Orchestrator extends EventEmitter {
 
       this.refreshModelState();
 
-      // Notify UI that a new agent was added
+      // Notify UI immediately so agents appear as "spawning"
       this.emit('agentAdded', supervisor);
 
       // Prevent unhandled 'error' event crash — errors are tracked via promise
@@ -254,30 +256,48 @@ export class Orchestrator extends EventEmitter {
         logger.error({ err, id }, 'Agent error event');
       });
 
-      try {
-        await supervisor.start();
-      } catch (err) {
-        logger.error({ err, id }, 'Failed to start agent');
-        const tracker = this.createTracker(id);
-        tracker.resolve({ id, status: 'error', error: `start failed: ${(err as Error).message}` });
-        continue;
-      }
+      prepared.push({ supervisor, task, id });
+    }
 
-      // Fire prompt without awaiting
-      const tracker = this.createTracker(id);
-      supervisor
-        .prompt(task.prompt)
+    // Phase 2: Start all supervisors with minimal stagger (ACP handshake)
+    const startPromises: Promise<{ supervisor: AgentSupervisor; task: AgentTask; id: string } | null>[] = [];
+
+    for (let i = 0; i < prepared.length; i++) {
+      const entry = prepared[i]!;
+
+      const startPromise = (async () => {
+        if (i > 0) {
+          await sleep(this.spawnStaggerMs);
+        }
+        try {
+          await entry.supervisor.start();
+          return entry;
+        } catch (err) {
+          logger.error({ err, id: entry.id }, 'Failed to start agent');
+          const tracker = this.createTracker(entry.id);
+          tracker.resolve({ id: entry.id, status: 'error', error: `start failed: ${(err as Error).message}` });
+          return null;
+        }
+      })();
+
+      startPromises.push(startPromise);
+    }
+
+    const started = await Promise.all(startPromises);
+
+    // Phase 3: Fire all prompts simultaneously (no stagger)
+    for (const entry of started) {
+      if (!entry) continue;
+
+      const tracker = this.createTracker(entry.id);
+      entry.supervisor
+        .prompt(entry.task.prompt)
         .then((stopReason) => {
-          tracker.resolve({ id, status: 'done', stopReason });
+          tracker.resolve({ id: entry.id, status: 'done', stopReason });
         })
         .catch((err: Error) => {
-          tracker.resolve({ id, status: 'error', error: err.message });
+          tracker.resolve({ id: entry.id, status: 'error', error: err.message });
         });
-
-      // Stagger between spawns (except last)
-      if (i < tasks.length - 1) {
-        await sleep(this.spawnStaggerMs);
-      }
     }
   }
 
