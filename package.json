@@ -1,0 +1,35 @@
+{
+  "name": "multi-copilot-orchestrator",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "dev:mock": "tsx src/index.ts --mock",
+    "dev:mock:slow": "tsx src/index.ts --mock --mock-scenario=slow",
+    "dev:mock:error": "tsx src/index.ts --mock --mock-scenario=error",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "cleanup": "tsx scripts/cleanup-worktrees.ts",
+    "reap": "tsx scripts/reap.ts"
+  },
+  "dependencies": {
+    "execa": "~9.6.0",
+    "ink": "~6.8.0",
+    "@inkjs/ui": "~2.0.0",
+    "react": "~19.0.0",
+    "simple-git": "~3.35.0",
+    "pino": "~10.3.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.0",
+    "tsx": "~4.21.0",
+    "vitest": "~4.1.0",
+    "@vitest/coverage-v8": "~4.1.0",
+    "@types/node": "~22.0.0",
+    "@types/react": "~19.0.0"
+  }
+}
