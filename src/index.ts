@@ -121,7 +121,8 @@ async function main(): Promise<void> {
 
   try { inkInstance.unmount(); } catch { /* ignore */ }
 
-  await orch.shutdown();
+  // Preserve worktrees on normal completion so user can inspect results
+  await orch.shutdown({ preserveWorktrees: true });
 
   const errors = results.filter((r) => r.status === 'error');
   if (errors.length > 0) {
@@ -131,7 +132,16 @@ async function main(): Promise<void> {
     }
   }
 
-  process.stderr.write(`\nDone. Logs: ${logFilePath}\n`);
+  // Show worktree paths so user knows where to find results
+  if (orch.worktrees.length > 0) {
+    process.stderr.write(`\nWorktrees (preserved):\n`);
+    for (const wt of orch.worktrees) {
+      process.stderr.write(`  ${wt.id}: ${wt.path}\n`);
+    }
+    process.stderr.write(`Run 'npm run cleanup' to remove worktrees when done.\n`);
+  }
+
+  process.stderr.write(`\nlogs: ${logFilePath}\n`);
   process.exit(errors.length > 0 ? 1 : 0);
 }
 

@@ -148,7 +148,7 @@ export class Orchestrator {
     return Promise.all(promises);
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(opts?: { preserveWorktrees?: boolean }): Promise<void> {
     // Cancel all
     await Promise.allSettled(this.supervisors.map((s) => s.cancel()));
 
@@ -161,9 +161,14 @@ export class Orchestrator {
     // Force shutdown
     await Promise.allSettled(this.supervisors.map((s) => s.shutdown()));
 
-    // Destroy all worktrees
-    await this.wm.destroyAll();
+    // Destroy worktrees unless explicitly preserved
+    if (!opts?.preserveWorktrees) {
+      await this.wm.destroyAll();
+    }
 
-    logger.info({ event: 'orchestrator_shutdown' }, 'Orchestrator shut down');
+    logger.info(
+      { event: 'orchestrator_shutdown', preserveWorktrees: opts?.preserveWorktrees ?? false },
+      'Orchestrator shut down',
+    );
   }
 }
