@@ -1,0 +1,140 @@
+name: Validate Agent Skills
+on:
+  pull_request:
+    paths:
+      - '.claude/skills/**'
+      - 'CLAUDE.md'
+  schedule:
+    - cron: '0 9 * * 1'  # Toda segunda às 9h — freshness check
+
+jobs:
+  validate-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check skill name kebab-case
+        run: |
+          errors=0
+          for dir in .claude/skills/*/; do
+            name=$(basename "$dir")
+            if [[ ! "$name" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
+              echo "::error::Skill '$name' is not kebab-case. Will be silently ignored by Claude Code."
+              errors=$((errors + 1))
+            fi
+          done
+          if [ "$errors" -gt 0 ]; then exit 1; fi
+          echo "All skill names are valid kebab-case."
+
+      - name: Check SKILL.md exists in each skill directory
+        run: |
+          errors=0
+          for dir in .claude/skills/*/; do
+            if [ ! -f "${dir}SKILL.md" ]; then
+              echo "::error::Missing SKILL.md in $dir"
+              errors=$((errors + 1))
+            fi
+          done
+          if [ "$errors" -gt 0 ]; then exit 1; fi
+          echo "All skill directories have SKILL.md."
+
+      - name: Check SKILL.md has valid frontmatter
+        run: |
+          errors=0
+          for skill in .claude/skills/*/SKILL.md; do
+            # Check frontmatter delimiters exist
+            if ! head -1 "$skill" | grep -q "^---$"; then
+              echo "::error file=$skill::Missing YAML frontmatter opening ---"
+              errors=$((errors + 1))
+              continue
+            fi
+
+            # Check name field exists
+            if ! grep -q "^name:" "$skill"; then
+              echo "::error file=$skill::Missing 'name' field in frontmatter"
+              errors=$((errors + 1))
+            fi
+
+            # Check description field exists
+            if ! grep -q "^description:" "$skill"; then
+              echo "::error file=$skill::Missing 'description' field in frontmatter"
+              errors=$((errors + 1))
+            fi
+          done
+          if [ "$errors" -gt 0 ]; then exit 1; fi
+          echo "All SKILL.md files have valid frontmatter."
+
+      - name: Check description length
+        run: |
+          for skill in .claude/skills/*/SKILL.md; do
+            # Extract description (multiline support with >-)
+            desc=$(awk '/^description:/{found=1; sub(/^description: *>?-? */, ""); if (length > 0) print; next} found && /^  /{sub(/^  */, ""); print; next} found{exit}' "$skill" | tr '\n' ' ')
+            len=${#desc}
+            if [ "$len" -gt 250 ]; then
+              echo "::warning file=$skill::Description is $len chars (>250), will be truncated in Claude Code listing"
+            fi
+            if [ "$len" -gt 1024 ]; then
+              echo "::error file=$skill::Description exceeds 1024 char limit ($len chars)"
+              exit 1
+            fi
+          done
+          echo "Description lengths checked."
+
+      - name: Check SKILL.md line count
+        run: |
+          for skill in .claude/skills/*/SKILL.md; do
+            lines=$(wc -l < "$skill")
+            if [ "$lines" -gt 500 ]; then
+              echo "::warning file=$skill::SKILL.md is $lines lines (recommended max: 500)"
+            fi
+          done
+          echo "Line counts checked."
+
+      - name: Verify referenced scripts exist
+        run: |
+          errors=0
+          for skill in .claude/skills/*/SKILL.md; do
+            dir=$(dirname "$skill")
+            # Find references to scripts/ in the SKILL.md
+            grep -oP '(?<=scripts/)[a-zA-Z0-9_./-]+' "$skill" 2>/dev/null | while read -r script; do
+              # Check in skill's own scripts/ dir
+              if [ ! -f "$dir/scripts/$script" ]; then
+                # Also check project root scripts/
+                if [ ! -f "scripts/$script" ]; then
+                  echo "::error file=$skill::Referenced script '$script' not found in $dir/scripts/ or scripts/"
+                  echo "1" > /tmp/ref_error
+                fi
+              fi
+            done
+          done
+          if [ -f /tmp/ref_error ]; then exit 1; fi
+          echo "All referenced scripts exist."
+
+  freshness-check:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect stale skills (>90 days without update)
+        run: |
+          stale=""
+          for skill in .claude/skills/*/SKILL.md; do
+            last_modified=$(git log -1 --format="%ct" -- "$skill" 2>/dev/null || echo "0")
+            now=$(date +%s)
+            if [ "$last_modified" -eq "0" ]; then
+              continue  # New file not yet committed
+            fi
+            age_days=$(( (now - last_modified) / 86400 ))
+            if [ "$age_days" -gt 90 ]; then
+              name=$(basename "$(dirname "$skill")")
+              stale="$stale\n- **$name** ($age_days days since last update)"
+            fi
+          done
+          if [ -n "$stale" ]; then
+            echo "::warning::Stale skills detected (>90 days):$stale"
+          else
+            echo "No stale skills detected."
+          fi
