@@ -44,10 +44,12 @@ function sleep(ms: number, signal?: { aborted: boolean }): Promise<void> {
 
 function createDefaultConfigOptions(initialModel?: string): SessionConfigOption[] {
   const openAiModels: SessionConfigValue[] = [
+    { value: 'gpt-5.4', name: 'GPT-5.4', description: 'Max reasoning — OpenAI' },
     { value: 'gpt-5', name: 'GPT-5', description: 'Balanced and capable' },
     { value: 'gpt-5-mini', name: 'GPT-5 mini', description: 'Fast and efficient' },
   ];
   const anthropicModels: SessionConfigValue[] = [
+    { value: 'claude-opus-4.6', name: 'Claude Opus 4.6', description: 'Max reasoning — Anthropic' },
     { value: 'claude-sonnet-4', name: 'Claude Sonnet 4', description: 'Strong long-context reasoning' },
   ];
 

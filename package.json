@@ -2,7 +2,10 @@
   "name": "multi-copilot-orchestrator",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
+  "private": false,
+  "bin": {
+    "multi-copilot": "./bin/multi-copilot.mjs"
+  },
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:mock": "tsx src/index.ts --mock",
@@ -22,11 +25,11 @@
     "@inkjs/ui": "~2.0.0",
     "react": "~19.0.0",
     "simple-git": "~3.35.0",
-    "pino": "~10.3.0"
+    "pino": "~10.3.0",
+    "tsx": "~4.21.0"
   },
   "devDependencies": {
     "typescript": "~5.7.0",
-    "tsx": "~4.21.0",
     "vitest": "~4.1.0",
     "@vitest/coverage-v8": "~4.1.0",
     "@types/node": "~22.0.0",
