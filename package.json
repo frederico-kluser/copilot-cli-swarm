@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "cleanup": "tsx scripts/cleanup-worktrees.ts",
-    "reap": "tsx scripts/reap.ts"
+    "reap": "tsx scripts/reap.ts",
+    "release": "npm version patch && npm link && git push && git push --tags"
   },
   "dependencies": {
     "execa": "~9.6.0",
