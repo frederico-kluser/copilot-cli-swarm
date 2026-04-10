@@ -22,19 +22,9 @@ export function App({ orchestrator, startedAt, interactive, onLaunch }: AppProps
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
-  // Wizard mode
-  if (mode === 'wizard') {
-    return (
-      <WizardScreen
-        onComplete={(config) => {
-          setMode('running');
-          onLaunch?.(config);
-        }}
-      />
-    );
-  }
-
   useEffect(() => {
+    if (mode !== 'running') return;
+
     if (modelState.availableModels.length === 0) {
       setHighlightedIndex(0);
       setSelectorOpen(false);
@@ -51,9 +41,11 @@ export function App({ orchestrator, startedAt, interactive, onLaunch }: AppProps
     }
 
     setHighlightedIndex((index) => Math.min(index, modelState.availableModels.length - 1));
-  }, [modelState.availableModels, modelState.selectedModel]);
+  }, [mode, modelState.availableModels, modelState.selectedModel]);
 
   useInput((input, key) => {
+    if (mode !== 'running') return;
+
     if (key.ctrl && input === 'c') {
       return;
     }
@@ -95,6 +87,18 @@ export function App({ orchestrator, startedAt, interactive, onLaunch }: AppProps
       void orchestrator.setModelForAll(selectedModel.value).catch(() => undefined);
     }
   });
+
+  // Wizard mode
+  if (mode === 'wizard') {
+    return (
+      <WizardScreen
+        onComplete={(config) => {
+          setMode('running');
+          onLaunch?.(config);
+        }}
+      />
+    );
+  }
 
   return (
     <Box flexDirection="column">
